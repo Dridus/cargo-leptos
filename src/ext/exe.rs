@@ -27,7 +27,7 @@ use semver::Version;
 pub struct ExeMeta {
     name: &'static str,
     version: String,
-    url: String,
+    url: Option<String>,
     exe: String,
     manual: String,
 }
@@ -37,6 +37,7 @@ lazy_static::lazy_static! {
 }
 
 pub const ENV_VAR_LEPTOS_CARGO_GENERATE_VERSION: &str = "LEPTOS_CARGO_GENERATE_VERSION";
+pub const ENV_VAR_LEPTOS_STYLANCE_VERSION: &str = "LEPTOS_STYLANCE_VERSION";
 pub const ENV_VAR_LEPTOS_TAILWIND_VERSION: &str = "LEPTOS_TAILWIND_VERSION";
 pub const ENV_VAR_LEPTOS_SASS_VERSION: &str = "LEPTOS_SASS_VERSION";
 pub const ENV_VAR_LEPTOS_WASM_OPT_VERSION: &str = "LEPTOS_WASM_OPT_VERSION";
@@ -58,8 +59,12 @@ impl ExeMeta {
 
     async fn _with_cache_dir(&self, cache_dir: &Path) -> Result<PathBuf> {
         let exe_dir = cache_dir.join(self.get_name());
+        let Some(ref url) = self.url else {
+            bail!("{} is required but was not found and no binary download URL is available. Please install it using your OS's tool of choice", &self.name);
+        };
         let c = ExeCache {
             meta: self,
+            url,
             exe_dir,
         };
         c.get().await
@@ -74,6 +79,7 @@ impl ExeMeta {
 pub struct ExeCache<'a> {
     exe_dir: PathBuf,
     meta: &'a ExeMeta,
+    url: &'a String,
 }
 
 impl<'a> ExeCache<'a> {
@@ -91,21 +97,21 @@ impl<'a> ExeCache<'a> {
         log::debug!(
             "Install downloading {} {}",
             self.meta.name,
-            GRAY.paint(&self.meta.url)
+            GRAY.paint(self.url)
         );
 
-        let response = reqwest::get(&self.meta.url).await?;
+        let response = reqwest::get(self.url).await?;
 
         match response.status().is_success() {
             true => Ok(response.bytes().await?),
-            false => bail!("Could not download from {}", self.meta.url),
+            false => bail!("Could not download from {}", self.url),
         }
     }
 
     fn extract_downloaded(&self, data: &Bytes) -> Result<()> {
-        if self.meta.url.ends_with(".zip") {
+        if self.url.ends_with(".zip") {
             extract_zip(data, &self.exe_dir)?;
-        } else if self.meta.url.ends_with(".tar.gz") {
+        } else if self.url.ends_with(".tar.gz") {
             extract_tar(data, &self.exe_dir)?;
         } else {
             self.write_binary(data)
@@ -215,6 +221,7 @@ pub enum Exe {
     CargoGenerate,
     Sass,
     WasmOpt,
+    Stylance,
     Tailwind,
 }
 
@@ -255,6 +262,10 @@ impl Exe {
                 .dot()?,
             Exe::Sass => CommandSass.exe_meta(target_os, target_arch).await.dot()?,
             Exe::WasmOpt => CommandWasmOpt
+                .exe_meta(target_os, target_arch)
+                .await
+                .dot()?,
+            Exe::Stylance => CommandStylance
                 .exe_meta(target_os, target_arch)
                 .await
                 .dot()?,
@@ -306,10 +317,48 @@ fn normalize_version(ver_string: &str) -> Option<Version> {
 // https://github.com/dtolnay/async-trait
 use async_trait::async_trait;
 
+struct CommandStylance;
 struct CommandTailwind;
 struct CommandWasmOpt;
 struct CommandSass;
 struct CommandCargoGenerate;
+
+#[async_trait]
+impl Command for CommandStylance {
+    fn name(&self) -> &'static str {
+        "stylance"
+    }
+    fn default_version(&self) -> &'static str {
+        "v0.5.2"
+    }
+    fn env_var_version_name(&self) -> &'static str {
+        ENV_VAR_LEPTOS_STYLANCE_VERSION
+    }
+    fn github_owner(&self) -> &'static str {
+        "basro"
+    }
+    fn github_repo(&self) -> &'static str {
+        "stylance-rs"
+    }
+    fn download_url(&self, _target_os: &str, _target_arch: &str, _version: &str) -> Result<Option<String>> {
+        Ok(None)
+    }
+    fn executable_name(
+        &self,
+        _target_os: &str,
+        _target_arch: &str,
+        _version: Option<&str>,
+    ) -> Result<String> {
+        Ok("stylance".into())
+    }
+    fn manual_install_instructions(&self) -> String {
+        "Try manually installing stylance-cli: https://github.com/basro/stylance-rs#stylance-cli"
+            .to_string()
+    }
+    async fn should_check_for_new_version(&self) -> bool {
+        false
+    }
+}
 
 #[async_trait]
 impl Command for CommandTailwind {
@@ -330,43 +379,48 @@ impl Command for CommandTailwind {
     }
 
     /// Tool binary download url for the given OS and platform arch
-    fn download_url(&self, target_os: &str, target_arch: &str, version: &str) -> Result<String> {
+    fn download_url(
+        &self,
+        target_os: &str,
+        target_arch: &str,
+        version: &str,
+    ) -> Result<Option<String>> {
         match (target_os, target_arch) {
-            ("windows", "x86_64") => Ok(format!(
+            ("windows", "x86_64") => Ok(Some(format!(
                 "https://github.com/{}/{}/releases/download/{}/{}-windows-x64.exe",
                 self.github_owner(),
                 self.github_repo(),
                 version,
                 self.name()
-            )),
-            ("macos", "x86_64") => Ok(format!(
+            ))),
+            ("macos", "x86_64") => Ok(Some(format!(
                 "https://github.com/{}/{}/releases/download/{}/{}-macos-x64",
                 self.github_owner(),
                 self.github_repo(),
                 version,
                 self.name()
-            )),
-            ("macos", "aarch64") => Ok(format!(
+            ))),
+            ("macos", "aarch64") => Ok(Some(format!(
                 "https://github.com/{}/{}/releases/download/{}/{}-macos-arm64",
                 self.github_owner(),
                 self.github_repo(),
                 version,
                 self.name()
-            )),
-            ("linux", "x86_64") => Ok(format!(
+            ))),
+            ("linux", "x86_64") => Ok(Some(format!(
                 "https://github.com/{}/{}/releases/download/{}/{}-linux-x64",
                 self.github_owner(),
                 self.github_repo(),
                 version,
                 self.name()
-            )),
-            ("linux", "aarch64") => Ok(format!(
+            ))),
+            ("linux", "aarch64") => Ok(Some(format!(
                 "https://github.com/{}/{}/releases/download/{}/{}-linux-arm64",
                 self.github_owner(),
                 self.github_repo(),
                 version,
                 self.name()
-            )),
+            ))),
             _ => bail!(
                 "Command [{}] failed to find a match for {}-{} ",
                 self.name(),
@@ -414,7 +468,12 @@ impl Command for CommandWasmOpt {
         "binaryen"
     }
 
-    fn download_url(&self, target_os: &str, target_arch: &str, version: &str) -> Result<String> {
+    fn download_url(
+        &self,
+        target_os: &str,
+        target_arch: &str,
+        version: &str,
+    ) -> Result<Option<String>> {
         let target = match (target_os, target_arch) {
             ("linux", "aarch64") => "aarch64-linux",
             ("linux", "x86_64") => "x86_64-linux",
@@ -426,14 +485,14 @@ impl Command for CommandWasmOpt {
             }
         };
 
-        Ok(format!(
+        Ok(Some(format!(
             "https://github.com/{}/{}/releases/download/{}/binaryen-{}-{}.tar.gz",
             self.github_owner(),
             self.github_repo(),
             version,
             version,
             target
-        ))
+        )))
     }
 
     fn executable_name(
@@ -483,9 +542,14 @@ impl Command for CommandSass {
         "dart-sass"
     }
 
-    fn download_url(&self, target_os: &str, target_arch: &str, version: &str) -> Result<String> {
+    fn download_url(
+        &self,
+        target_os: &str,
+        target_arch: &str,
+        version: &str,
+    ) -> Result<Option<String>> {
         let is_musl_env = is_linux_musl_env();
-        Ok(if is_musl_env {
+        Ok(Some(if is_musl_env {
             match target_arch {
                 "x86_64" => {
                     format!(
@@ -524,7 +588,7 @@ impl Command for CommandSass {
                 }
                 _ => bail!("No sass tar binary found for {target_os} {target_arch}"),
             }
-        })
+        }))
     }
 
     fn executable_name(
@@ -562,7 +626,12 @@ impl Command for CommandCargoGenerate {
         "cargo-generate"
     }
 
-    fn download_url(&self, target_os: &str, target_arch: &str, version: &str) -> Result<String> {
+    fn download_url(
+        &self,
+        target_os: &str,
+        target_arch: &str,
+        version: &str,
+    ) -> Result<Option<String>> {
         let is_musl_env = is_linux_musl_env();
 
         let target = if is_musl_env {
@@ -582,14 +651,14 @@ impl Command for CommandCargoGenerate {
             }
         };
 
-        Ok(format!(
+        Ok(Some(format!(
             "https://github.com/{}/{}/releases/download/{}/cargo-generate-{}-{}.tar.gz",
             self.github_owner(),
             self.github_repo(),
             version,
             version,
             target
-        ))
+        )))
     }
 
     fn executable_name(
@@ -620,7 +689,12 @@ trait Command {
     fn env_var_version_name(&self) -> &str;
     fn github_owner(&self) -> &str;
     fn github_repo(&self) -> &str;
-    fn download_url(&self, target_os: &str, target_arch: &str, version: &str) -> Result<String>;
+    fn download_url(
+        &self,
+        target_os: &str,
+        target_arch: &str,
+        version: &str,
+    ) -> Result<Option<String>>;
     fn executable_name(
         &self,
         target_os: &str,
@@ -654,7 +728,7 @@ trait Command {
         Ok(ExeMeta {
             name: self.name(),
             version,
-            url: url.to_owned(),
+            url: url.map(|u| u.to_owned()),
             exe: exe.to_string(),
             manual: self.manual_install_instructions(),
         })

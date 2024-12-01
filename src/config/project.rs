@@ -112,7 +112,7 @@ impl Project {
                 name: project.name.clone(),
                 lib,
                 bin,
-                style: StyleConfig::new(&config)?,
+                style: StyleConfig::new(&config, metadata)?,
                 watch,
                 release: cli.release,
                 precompress: cli.precompress,
@@ -182,6 +182,8 @@ pub struct ProjectConfig {
     /// whether to hash the frontend files content and add them to the file names
     #[serde(default = "default_hash_files")]
     pub hash_files: bool,
+    #[serde(default)]
+    pub stylance_package: Option<String>,
     pub tailwind_input_file: Option<Utf8PathBuf>,
     pub tailwind_config_file: Option<Utf8PathBuf>,
     /// assets dir. content will be copied to the target/site dir

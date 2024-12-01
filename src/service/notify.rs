@@ -123,11 +123,20 @@ fn handle(watched: Watched, proj: Arc<Project>) {
         }
     }
 
+    if let Some(stylance) = &proj.style.stylance {
+        // technically this should be whatever the source directories of the target
+        // package are and not the directory with the manifest.
+        if path.starts_with(&stylance.package_dir) {
+            log::debug!("Notify stylance style change {}", GRAY.paint(watched.to_string()));
+            changes.push(Change::Style);
+        }
+    }
+
     if let Some(tailwind) = &proj.style.tailwind {
         if path.as_path() == tailwind.config_file.as_path()
             || path.as_path() == tailwind.input_file.as_path()
         {
-            log::debug!("Notify style change {}", GRAY.paint(watched.to_string()));
+            log::debug!("Notify tailwind style change {}", GRAY.paint(watched.to_string()));
             changes.push(Change::Style)
         }
     }

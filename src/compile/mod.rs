@@ -7,6 +7,7 @@ mod front;
 mod hash;
 mod sass;
 mod server;
+mod stylance;
 mod style;
 mod tailwind;
 

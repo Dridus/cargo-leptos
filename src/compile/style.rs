@@ -1,6 +1,6 @@
 use super::ChangeSet;
 use crate::{
-    compile::{sass::compile_sass, tailwind::compile_tailwind},
+    compile::{sass::compile_sass, stylance::compile_stylance, tailwind::compile_tailwind},
     config::Project,
     ext::{
         anyhow::{anyhow, bail, Context, Result},
@@ -34,6 +34,7 @@ pub async fn style(
         build(&proj).await
     })
 }
+
 fn build_sass(proj: &Arc<Project>) -> JoinHandle<Result<Outcome<String>>> {
     let proj = proj.clone();
     tokio::spawn(async move {
@@ -58,6 +59,19 @@ fn build_sass(proj: &Arc<Project>) -> JoinHandle<Result<Outcome<String>>> {
     })
 }
 
+fn build_stylance(proj: &Arc<Project>) -> JoinHandle<Result<Outcome<String>>> {
+    let proj = proj.clone();
+    tokio::spawn(async move {
+        let Some(ref stylance_config) = proj.style.stylance else {
+            log::trace!("Stylance not enabled");
+            return Ok(Outcome::Success("".to_string()));
+        };
+
+        log::trace!("Running stylance");
+        compile_stylance(stylance_config).await
+    })
+}
+
 fn build_tailwind(proj: &Arc<Project>) -> JoinHandle<Result<Outcome<String>>> {
     let proj = proj.clone();
     tokio::spawn(async move {
@@ -71,16 +85,18 @@ fn build_tailwind(proj: &Arc<Project>) -> JoinHandle<Result<Outcome<String>>> {
 }
 
 async fn build(proj: &Arc<Project>) -> Result<Outcome<Product>> {
+    let stylance_handle = build_stylance(proj);
     let css_handle = build_sass(proj);
     let tw_handle = build_tailwind(proj);
+    let stylance = stylance_handle.await??;
     let css = css_handle.await??;
     let tw = tw_handle.await??;
 
     use Outcome::*;
-    let css = match (css, tw) {
-        (Stopped, _) | (_, Stopped) => return Ok(Stopped),
-        (Failed, _) | (_, Failed) => return Ok(Failed),
-        (Success(css), Success(tw)) => format!("{css}\n{tw}"),
+    let css = match (css, stylance, tw) {
+        (Stopped, _, _) | (_, Stopped, _) | (_, _, Stopped) => return Ok(Stopped),
+        (Failed, _, _) | (_, Failed, _) | (_, _, Failed) => return Ok(Failed),
+        (Success(css), Success(stylance), Success(tw)) => format!("{css}\n{stylance}\n{tw}"),
     };
     Ok(Success(process_css(proj, css).await?))
 }

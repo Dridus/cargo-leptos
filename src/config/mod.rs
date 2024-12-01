@@ -10,6 +10,7 @@ mod hash_file;
 mod lib_package;
 mod profile;
 mod project;
+mod stylance;
 mod style;
 mod tailwind;
 
@@ -25,6 +26,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use cargo_metadata::Metadata;
 pub use profile::Profile;
 pub use project::{Project, ProjectConfig};
+pub use stylance::StylanceConfig;
 pub use style::StyleConfig;
 pub use tailwind::TailwindConfig;
 
